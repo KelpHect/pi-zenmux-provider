@@ -1,0 +1,11 @@
+export const PROVIDER_ID = "zenmux";
+export const PROVIDER_LABEL = "ZenMux AI";
+export const BASE_URL = "https://zenmux.ai/api/v1";
+export const MODELS_URL = `${BASE_URL}/models`;
+export const BALANCE_URL = MODELS_URL;
+export const API_KEY_ENV = "ZENMUX_API_KEY";
+export const KEY_MANAGEMENT_URL = "https://zenmux.ai/platform/api-keys";
+export const LOG_PREFIX = "[pi-zenmux]";
+export const REQUEST_TIMEOUT_MS = 5000;
+export const DEFAULT_CONTEXT_WINDOW = 128000;
+export const DEFAULT_MAX_TOKENS = 4096;

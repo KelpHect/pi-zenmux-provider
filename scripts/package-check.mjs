@@ -23,6 +23,9 @@ const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8
 const packageLock = JSON.parse(
   readFileSync(resolve(root, "package-lock.json"), "utf8"),
 );
+if (packageJson.dependencies && Object.keys(packageJson.dependencies).length > 0) {
+  fail("runtime dependencies would be installed into Pi's extension environment");
+}
 if (packageJson.version !== packageLock.version) {
   fail(`package.json is ${packageJson.version}, lockfile is ${packageLock.version}`);
 }

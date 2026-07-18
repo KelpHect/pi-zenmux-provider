@@ -65,6 +65,10 @@ ZenMux exposes the OpenAI Chat Completions API at
 `https://zenmux.ai/api/v1`. The extension uses Pi's built-in
 `openai-completions` transport.
 
+The published package has no runtime dependencies. Pi provides the two
+`@earendil-works/pi-*` peer APIs through its extension loader, and Pi's package
+manager disables peer auto-installation for managed extensions.
+
 At startup it requests `GET /models`, validates the response, removes duplicate
 or malformed entries, and registers chat-capable models. The catalog includes
 context windows, input modalities, reasoning capability, and token prices.

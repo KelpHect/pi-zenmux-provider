@@ -44,7 +44,7 @@ export interface ProviderModel {
 }
 
 // ZenMux's API accepts OpenAI Chat Completions requests with these deviations
-// (all verified against https://zenmux.ai/docs/api-reference/model-apis-llm-create-chat-completion):
+// (all verified against https://zenmux.ai/docs/api/openai/create-chat-completion.html):
 // - "system" role only; the "developer" role is not supported
 // - `max_tokens` only; `max_completion_tokens` is not supported
 // - no Responses-API `store` parameter

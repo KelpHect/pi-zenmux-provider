@@ -172,8 +172,16 @@ test("parseZenMuxError accepts only the documented structured shape", () => {
     parseZenMuxError('{"code":401,"reason":"UNAUTHORIZED","message":"key not found"}'),
     { code: 401, reason: "UNAUTHORIZED", message: "key not found" },
   );
+  assert.deepEqual(
+    parseZenMuxError('{"error":{"code":"403","type":"access_denied","message":"key rejected"}}'),
+    { code: 403, reason: "access_denied", message: "key rejected" },
+  );
   assert.equal(parseZenMuxError("gateway unavailable"), null);
-  assert.equal(parseZenMuxError('{"code":"401","reason":"x","message":"y"}'), null);
+  assert.deepEqual(parseZenMuxError('{"code":"401","reason":"x","message":"y"}'), {
+    code: 401,
+    reason: "x",
+    message: "y",
+  });
 });
 
 test("validateApiKey distinguishes valid, invalid, and indeterminate results", async () => {

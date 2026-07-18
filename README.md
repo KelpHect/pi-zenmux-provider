@@ -35,7 +35,7 @@ pi -e npm:pi-zenmux-provider
 ## Configure
 
 Run `/login` in Pi and choose **ZenMux AI**, then enter a key from the
-[ZenMux API key page](https://zenmux.ai/platform/api-keys).
+[ZenMux Pay As You Go page](https://zenmux.ai/platform/pay-as-you-go).
 
 You can also provide the key through the environment:
 

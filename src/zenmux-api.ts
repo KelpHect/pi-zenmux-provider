@@ -1,5 +1,5 @@
 import {
-  BALANCE_URL,
+  AUTH_VALIDATION_URL,
   BASE_URL,
   MODELS_URL,
   REQUEST_TIMEOUT_MS,
@@ -111,6 +111,8 @@ const AUTH_FAILURE_REASONS = new Set([
   "MISSING_API_KEY",
   "UNAUTHORIZED",
   "BILLING_AUTH_FAILED",
+  "access_denied",
+  "ACCESS_DENIED",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -326,17 +328,19 @@ export function parseZenMuxError(body: string): ZenMuxError | null {
   try {
     const parsed = JSON.parse(body) as unknown;
     if (!isRecord(parsed)) return null;
-    const code = parsed.code;
-    const reason = parsed.reason;
-    const message = parsed.message;
+    const nested = isRecord(parsed.error) ? parsed.error : undefined;
+    const code = nested?.code ?? parsed.code;
+    const reason = nested?.type ?? parsed.reason;
+    const message = nested?.message ?? parsed.message;
+    const numericCode = typeof code === "string" && /^\d+$/.test(code) ? Number(code) : code;
     if (
-      Number.isInteger(code) &&
+      Number.isInteger(numericCode) &&
       typeof reason === "string" &&
       reason.length > 0 &&
       typeof message === "string" &&
       message.length > 0
     ) {
-      return { code: code as number, reason, message };
+      return { code: numericCode as number, reason, message };
     }
   } catch {
     // Plain-text provider errors are handled by the caller.
@@ -447,7 +451,7 @@ export async function validateApiKey(
   const fetchImpl = options.fetchImpl ?? fetch;
   const signal = requestSignal(options.signal);
   try {
-    const response = await fetchImpl(BALANCE_URL, {
+    const response = await fetchImpl(AUTH_VALIDATION_URL, {
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -472,7 +476,7 @@ export async function validateApiKey(
       return {
         status: "indeterminate",
         httpStatus: response.status,
-        detail: "ZenMux returned a malformed balance response",
+        detail: "ZenMux returned a malformed models response",
       };
     }
 

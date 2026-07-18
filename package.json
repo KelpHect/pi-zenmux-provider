@@ -1,6 +1,9 @@
 {
   "name": "pi-zenmux-provider",
-  "version": "2.2.0",
+  "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Pi extension that registers ZenMux AI as an OpenAI-compatible model provider.",
   "license": "MIT",
   "author": "KelpHect",

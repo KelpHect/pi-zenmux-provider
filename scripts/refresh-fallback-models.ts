@@ -7,7 +7,6 @@ import { parseModelCatalog } from "../src/zenmux-api.js";
 
 // Keep this list aligned with ZenMux's recommended-model guide.
 const FALLBACK_MODEL_IDS = [
-  "moonshotai/kimi-k3-free",
   "moonshotai/kimi-k3",
   "openai/gpt-5.6-luna",
   "openai/gpt-5.6-terra",

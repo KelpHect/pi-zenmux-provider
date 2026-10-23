@@ -28,6 +28,19 @@ const GUIDANCE: Record<string, string> = {
   rate_limit: "ZenMux rate limit hit. Retry shortly",
   invalid_params:
     "ZenMux rejected the request parameters. Check the model capabilities and context size",
+  quote_exceeded:
+    "Your ZenMux subscription quota is used up. Wait for the quota to reset or switch to a Pay As You Go key from https://zenmux.ai/platform/pay-as-you-go",
+  safety_check_failed:
+    "ZenMux blocked the request in its safety check. Rephrase the input or pick another model with /model",
+  provider_unprocessable_entity_error:
+    "The upstream provider could not process the request. Check the model capabilities and parameters, or pick another model with /model",
+  internal_server_error: "ZenMux hit an internal error. Retry shortly",
+  provider_api_error: "The upstream provider returned an API error. Retry shortly or pick another model with /model",
+  provider_error: "The upstream provider reported an error. Retry shortly or pick another model with /model",
+  no_provider_available:
+    "ZenMux has no provider available for this model right now. Retry shortly or pick another model with /model",
+  provider_internal_server_error:
+    "The upstream provider hit an internal error. Retry shortly or pick another model with /model",
 };
 
 // Pi triggers auto-compaction + retry when an error message contains this
@@ -55,6 +68,10 @@ export function registerErrorDecoder(pi: ExtensionAPI): void {
   });
 }
 
+const NO_BODY_PATTERN = /^(\d{3}) status code \(no body\)$/;
+const STATUS_PREFIX_PATTERN = /^\d{3}:\s*/;
+const PROMPT_TOO_LONG_STATUS = 413;
+
 /** Returns the rewritten error message, or null to leave it unchanged. */
 export function decodeErrorMessage(errorMessage: string): string | null {
   if (errorMessage.includes(OVERFLOW_MARKER)) return null;
@@ -63,12 +80,45 @@ export function decodeErrorMessage(errorMessage: string): string | null {
     return `${OVERFLOW_MARKER}: ${errorMessage}`;
   }
 
-  const body = errorMessage.replace(/^\d{3}:\s*/, "");
+  const noBody = NO_BODY_PATTERN.exec(errorMessage);
+  if (noBody) return decodeNoBody(Number(noBody[1]), errorMessage);
+
+  const body = errorMessage.replace(STATUS_PREFIX_PATTERN, "");
   const error = parseZenMuxError(body);
   if (!error) return null;
+
+  if (error.code === PROMPT_TOO_LONG_STATUS && error.reason === "invalid_params") {
+    return `${OVERFLOW_MARKER}: ${errorMessage}`;
+  }
 
   const guidance = GUIDANCE[error.reason];
   return guidance
     ? `ZenMux ${error.reason} (HTTP ${error.code}): ${error.message}. ${guidance}`
     : `ZenMux ${error.reason} (HTTP ${error.code}): ${error.message}`;
+}
+
+function decodeNoBody(status: number, errorMessage: string): string | null {
+  const prefix = `ZenMux returned HTTP ${status} without a readable error body.`;
+  if (status === 400) {
+    return `${prefix} Check that the model supports the request parameters and fits the context size. If it keeps failing, report it to ZenMux.`;
+  }
+  if (status === 401 || status === 403) {
+    return `${prefix} The API key may be missing or rejected, or the account may lack access. Run /login to set a key and check /zenmux. Keys: ${KEY_MANAGEMENT_URL}`;
+  }
+  if (status === 402) {
+    return `${prefix} The account balance may be empty. Top up at ${KEY_MANAGEMENT_URL} and check /zenmux`;
+  }
+  if (status === 404) {
+    return `${prefix} The model id is probably not available on ZenMux. Pick another with /model`;
+  }
+  if (status === PROMPT_TOO_LONG_STATUS) {
+    return `${OVERFLOW_MARKER}: ${errorMessage}`;
+  }
+  if (status === 429) {
+    return `${prefix} ZenMux rate limit (HTTP 429). Retry shortly`;
+  }
+  if (status >= 500 && status <= 599) {
+    return `${prefix} ZenMux reports a server error (HTTP ${status}). Retry shortly`;
+  }
+  return null;
 }

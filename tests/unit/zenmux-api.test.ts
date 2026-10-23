@@ -326,3 +326,47 @@ test("request helpers classify abort and timeout errors without leaking secrets"
   assert.equal(validation.status, "indeterminate");
   assert.match(validation.detail, /timed out/);
 });
+
+test("parseZenMuxError accepts the unwrapped inner object with a string code", () => {
+  assert.deepEqual(
+    parseZenMuxError('{"code":"429","type":"rate_limit","message":"slow down"}'),
+    { code: 429, reason: "rate_limit", message: "slow down" },
+  );
+  assert.equal(parseZenMuxError('{"code":"429","message":"no reason"}'), null);
+});
+
+test("parseModelCatalog reads the live max_tokens as max output", () => {
+  const parsed = parseModelCatalog({
+    data: [
+      { id: "vendor/live", max_tokens: 512_000 },
+      { id: "vendor/both", max_tokens: 1_000, max_output_tokens: 2_000 },
+      { id: "vendor/bad", max_tokens: -5 },
+    ],
+  });
+  const byId = new Map(parsed?.models.map((model) => [model.id, model]));
+  assert.equal(byId.get("vendor/live")?.max_output_tokens, 512_000);
+  assert.equal(byId.get("vendor/both")?.max_output_tokens, 2_000);
+  assert.equal(byId.get("vendor/bad")?.max_output_tokens, undefined);
+});
+
+test("parseModelCatalog keeps conditioned prompt tiers and accepts string bounds", () => {
+  const parsed = parseModelCatalog({
+    data: [
+      {
+        id: "vendor/tiered",
+        pricings: {
+          prompt: [
+            { value: 0.1, unit: "perMTokens", conditions: { prompt_tokens: { unit: "kTokens", gte: "0" } } },
+            { value: 0.5, unit: "perMTokens", conditions: { prompt_tokens: { unit: "kTokens", gte: "100" } } },
+          ],
+          completion: [{ value: 1, unit: "perMTokens" }],
+        },
+      },
+    ],
+  });
+  const pricing = parsed?.models[0]?.pricings;
+  assert.equal(pricing?.prompt?.value, 0.1);
+  assert.equal(pricing?.tiers?.prompt?.length, 2);
+  assert.equal(pricing?.tiers?.prompt?.[1]?.conditions?.prompt_tokens?.gte, 100);
+  assert.equal(pricing?.tiers?.completion, undefined);
+});

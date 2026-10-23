@@ -1,7 +1,10 @@
-import type {
-  ZenMuxBillingTier,
-  ZenMuxModel,
-  ZenMuxPricing,
+import {
+  ZENMUX_PRICE_CATEGORIES,
+  type ZenMuxBillingTier,
+  type ZenMuxModel,
+  type ZenMuxPrice,
+  type ZenMuxPriceCategory,
+  type ZenMuxPricing,
 } from "./zenmux-api.js";
 import {
   DEFAULT_CONTEXT_WINDOW,
@@ -45,15 +48,17 @@ export interface ProviderModel {
 
 // ZenMux's API accepts OpenAI Chat Completions requests with these deviations
 // (all verified against https://zenmux.ai/docs/api/openai/create-chat-completion.html):
-// - "system" role only; the "developer" role is not supported
-// - `max_tokens` only; `max_completion_tokens` is not supported
+// - "system" role: the docs now also list a "developer" message, but
+//   "system" stays the portable choice across ZenMux's routed upstreams
+// - `max_completion_tokens`; `max_tokens` is listed under "Unsupported fields"
+//   ("Deprecated; replaced by max_completion_tokens", re-checked 2026-10-22)
 // - no Responses-API `store` parameter
 // - usage is present in streaming responses via stream_options.include_usage
 // Explicit compat matters: Pi's auto-detection assumes OpenAI defaults for
-// unknown base URLs (developer role, max_completion_tokens, store).
+// unknown base URLs (developer role, store).
 const BASE_COMPAT: OpenAICompletionsCompat = {
   supportsDeveloperRole: false,
-  maxTokensField: "max_tokens",
+  maxTokensField: "max_completion_tokens",
   supportsUsageInStreaming: true,
   supportsStore: false,
   supportsStrictMode: true,
@@ -127,10 +132,82 @@ function toCost(model: ZenMuxModel): ModelCost {
     };
   }
 
-  if (model.pricings) return ratesFromPricing(model.pricings);
-  if (model.pricing) return ratesFromPricing(model.pricing);
+  const pricing = model.pricings ?? model.pricing;
+  if (pricing) return costFromPricing(pricing);
 
   return flatCost(model);
+}
+
+const PROMPT_UNIT_TOKENS: Record<string, number> = { kTokens: 1000, tokens: 1 };
+
+interface CategoryTiers {
+  base?: ZenMuxPrice;
+  above: Map<number, ZenMuxPrice>;
+}
+
+/** Splits one category's conditioned entries; null when a unit is unknown. */
+function splitCategoryTiers(entries: ZenMuxPrice[]): CategoryTiers | null {
+  const result: CategoryTiers = { above: new Map() };
+  for (const entry of entries) {
+    const condition = entry.conditions?.prompt_tokens;
+    if (!condition) {
+      result.base ??= entry;
+      continue;
+    }
+    const unitTokens = PROMPT_UNIT_TOKENS[condition.unit];
+    if (unitTokens === undefined) return null;
+    const isGt = condition.gte === undefined && condition.gt !== undefined;
+    const lower = condition.gte ?? condition.gt;
+    const lowerTokens = lower === undefined ? 0 : lower * unitTokens;
+    if (!isGt && lowerTokens <= 0) {
+      result.base ??= entry;
+      continue;
+    }
+    const above = isGt ? lowerTokens : lowerTokens - 1;
+    if (!result.above.has(above)) result.above.set(above, entry);
+  }
+  return result;
+}
+
+function costFromPricing(pricing: ZenMuxPricing): ModelCost {
+  const baseRates = ratesFromPricing(pricing);
+  if (!pricing.tiers) return baseRates;
+
+  const split = new Map<ZenMuxPriceCategory, CategoryTiers>();
+  for (const category of ZENMUX_PRICE_CATEGORIES) {
+    const entries = pricing.tiers[category];
+    if (!entries) continue;
+    const categoryTiers = splitCategoryTiers(entries);
+    if (!categoryTiers) return baseRates;
+    split.set(category, categoryTiers);
+  }
+
+  const baseOf = (category: ZenMuxPriceCategory): ZenMuxPrice | undefined =>
+    split.get(category)?.base ?? pricing[category];
+  const ratesAt = (pick: (category: ZenMuxPriceCategory) => ZenMuxPrice | undefined) => {
+    const picked: ZenMuxPricing = {};
+    for (const category of ZENMUX_PRICE_CATEGORIES) {
+      const price = pick(category);
+      if (price) picked[category] = price;
+    }
+    return ratesFromPricing(picked);
+  };
+
+  const boundaries = new Set<number>();
+  for (const categoryTiers of split.values()) {
+    for (const above of categoryTiers.above.keys()) boundaries.add(above);
+  }
+  if (boundaries.size === 0) return ratesAt(baseOf);
+
+  return {
+    ...ratesAt(baseOf),
+    tiers: [...boundaries]
+      .sort((left, right) => left - right)
+      .map((above) => ({
+        inputTokensAbove: Math.max(0, above),
+        ...ratesAt((category) => split.get(category)?.above.get(above) ?? baseOf(category)),
+      })),
+  };
 }
 
 function flatCost(model: ZenMuxModel): ModelCostRates {

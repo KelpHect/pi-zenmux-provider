@@ -9,7 +9,7 @@ or deliberately disabled network access.
 ## Requirements
 
 - Node.js 22.19 or newer
-- Pi 0.80.7 or newer
+- Pi 1.0.0 or newer
 - A ZenMux API key
 
 ## Install
@@ -71,7 +71,18 @@ manager disables peer auto-installation for managed extensions.
 
 At startup it requests `GET /models`, validates the response, removes duplicate
 or malformed entries, and registers chat-capable models. The catalog includes
-context windows, input modalities, reasoning capability, and token prices.
+context windows, maximum output tokens (the catalog's `max_tokens`), input
+modalities, reasoning capability, and token prices.
+
+Requests send the output limit as `max_completion_tokens`. ZenMux's
+chat-completion docs list `max_tokens` under unsupported fields (deprecated in
+favor of `max_completion_tokens`), so the extension no longer sends it.
+
+Some models are priced by prompt length. The catalog expresses this with
+`conditions.prompt_tokens` bounds in `kTokens` (or `tokens`), as numbers or
+numeric strings. The entry starting at 0 is the base rate, and every other
+entry becomes a Pi cost tier that applies once the prompt reaches its bound.
+Price arrays without conditions keep the first entry.
 
 If discovery fails, `PI_OFFLINE=1` is set, or no usable chat models are
 returned, the bundled catalog in `src/fallback-models.ts` is used.
@@ -86,6 +97,20 @@ ZenMux supports `reasoning_effort` for reasoning models. Pi's thinking levels
 are mapped to the values supported by ZenMux. Tools, structured output, image
 inputs, streaming, and usage reporting use the normal Chat Completions request
 format.
+
+## Errors
+
+ZenMux error bodies shaped as `{"error":{"code","type","message"}}` are decoded
+into actionable Pi messages. Pi surfaces the inner object, so the unwrapped form
+`{"code":"429","type":"rate_limit","message":"..."}` and the legacy
+`{code,reason,message}` form are accepted as well. Guidance covers
+authentication, credit and quota errors, access and safety rejections, model
+availability, rate limits, and upstream provider failures. A 413
+`invalid_params` ("Prompt too long") response and context-overflow wording are
+normalized so Pi can compact the conversation. A bare
+`<status> status code (no body)` failure gets status-specific guidance.
+Decoded messages never include Pi's explicit auto-retry phrase, because ZenMux
+has no known intermittent error signature.
 
 ## Development
 

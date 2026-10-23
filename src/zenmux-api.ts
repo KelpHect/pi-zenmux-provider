@@ -43,11 +43,22 @@ export interface ZenMuxModel {
   tiered_billing_configs?: ZenMuxBillingTier[];
 }
 
+export const ZENMUX_PRICE_CATEGORIES = [
+  "prompt",
+  "completion",
+  "input_cache_read",
+  "input_cache_write",
+] as const;
+
+export type ZenMuxPriceCategory = (typeof ZENMUX_PRICE_CATEGORIES)[number];
+
 export interface ZenMuxPricing {
   prompt?: ZenMuxPrice;
   completion?: ZenMuxPrice;
   input_cache_read?: ZenMuxPrice;
   input_cache_write?: ZenMuxPrice;
+  /** Every entry of categories priced by several prompt-length conditions. */
+  tiers?: Partial<Record<ZenMuxPriceCategory, ZenMuxPrice[]>>;
 }
 
 export interface ZenMuxPrice {
@@ -131,6 +142,13 @@ function nonNegativeNumber(value: unknown): number | undefined {
     : undefined;
 }
 
+function numericBound(value: unknown): number | undefined {
+  if (typeof value === "string" && /^\d+(\.\d+)?$/.test(value.trim())) {
+    return Number(value);
+  }
+  return nonNegativeNumber(value);
+}
+
 function optionalNumber(
   record: Record<string, unknown>,
   key: string,
@@ -185,22 +203,25 @@ function parsePrice(value: unknown): ZenMuxPrice | undefined {
   const unit = typeof value.unit === "string" ? value.unit : undefined;
   if (price === undefined && legacy === undefined) return undefined;
   const c = isRecord(value.conditions) && isRecord(value.conditions.prompt_tokens) ? value.conditions.prompt_tokens : undefined;
-  const conditions = c ? { prompt_tokens: { unit: typeof c.unit === "string" ? c.unit : "kTokens", gte: nonNegativeNumber(c.gte), gt: nonNegativeNumber(c.gt), lt: nonNegativeNumber(c.lt), lte: nonNegativeNumber(c.lte) } } : undefined;
+  const conditions = c ? { prompt_tokens: { unit: typeof c.unit === "string" ? c.unit : "kTokens", gte: numericBound(c.gte), gt: numericBound(c.gt), lt: numericBound(c.lt), lte: numericBound(c.lte) } } : undefined;
   return { ...(price !== undefined ? { value: price } : {}), ...(legacy !== undefined ? { price_per_m: legacy } : {}), ...(unit ? { unit } : {}), ...(conditions ? { conditions } : {}) };
 }
 
 function parsePricing(value: unknown): ZenMuxPricing | undefined {
   if (!isRecord(value)) return undefined;
   const pricing: ZenMuxPricing = {};
-  const first = (v: unknown) => Array.isArray(v) ? v.map(parsePrice).find(Boolean) : parsePrice(v);
-  const prompt = first(value.prompt);
-  const completion = first(value.completion);
-  const cacheRead = first(value.input_cache_read);
-  const cacheWrite = first(value.input_cache_write);
-  if (prompt) pricing.prompt = prompt;
-  if (completion) pricing.completion = completion;
-  if (cacheRead) pricing.input_cache_read = cacheRead;
-  if (cacheWrite) pricing.input_cache_write = cacheWrite;
+  const tiers: Partial<Record<ZenMuxPriceCategory, ZenMuxPrice[]>> = {};
+  for (const category of ZENMUX_PRICE_CATEGORIES) {
+    const raw = value[category];
+    const entries = (Array.isArray(raw) ? raw : [raw])
+      .map(parsePrice)
+      .filter((entry): entry is ZenMuxPrice => entry !== undefined);
+    const first = entries[0];
+    if (!first) continue;
+    pricing[category] = first;
+    if (entries.some((entry) => entry.conditions)) tiers[category] = entries;
+  }
+  if (Object.keys(tiers).length > 0) pricing.tiers = tiers;
   return Object.keys(pricing).length > 0 ? pricing : undefined;
 }
 
@@ -244,6 +265,7 @@ function parseModel(value: unknown): ZenMuxModel | null {
   const contextSize = optionalPositiveInteger(value, "context_length");
   const legacyContext = optionalPositiveInteger(value, "context_size");
   const legacyMax = optionalPositiveInteger(value, "max_output_tokens");
+  const liveMax = optionalPositiveInteger(value, "max_tokens");
   const legacyType = optionalString(value, "model_type");
   const legacyFeatures = knownStringArray(value.features, ZENMUX_FEATURES);
   const capabilities = isRecord(value.capabilities) ? { reasoning: value.capabilities.reasoning === true, function_calling: value.capabilities.function_calling === true, structured_outputs: value.capabilities.structured_outputs === true } : undefined;
@@ -265,7 +287,8 @@ function parseModel(value: unknown): ZenMuxModel | null {
   if (displayName) model.display_name = displayName;
   if (contextSize !== undefined) { model.context_length = contextSize; model.context_size = contextSize; }
   if (legacyContext !== undefined) model.context_size = legacyContext;
-  if (legacyMax !== undefined) model.max_output_tokens = legacyMax;
+  const maxOutput = legacyMax ?? liveMax;
+  if (maxOutput !== undefined) model.max_output_tokens = maxOutput;
   if (legacyType) model.model_type = legacyType;
   if (legacyFeatures) model.features = legacyFeatures;
   if (capabilities) model.capabilities = capabilities;
@@ -330,7 +353,7 @@ export function parseZenMuxError(body: string): ZenMuxError | null {
     if (!isRecord(parsed)) return null;
     const nested = isRecord(parsed.error) ? parsed.error : undefined;
     const code = nested?.code ?? parsed.code;
-    const reason = nested?.type ?? parsed.reason;
+    const reason = nested?.type ?? parsed.reason ?? parsed.type;
     const message = nested?.message ?? parsed.message;
     const numericCode = typeof code === "string" && /^\d+$/.test(code) ? Number(code) : code;
     if (
